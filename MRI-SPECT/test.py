@@ -109,7 +109,7 @@ def main():
     model = model.to(device)
 
     # 加载训练好的模型
-    model_path = 'models/model_epoch_82.pth'
+    model_path = 'models/model_epoch_75.pth'
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"模型文件未找到: {model_path}")
 
