@@ -20,18 +20,17 @@ class Convlutioanl(nn.Module):
         return out
 
 # 多尺度特征提取模块
-class ResidualDilatedConvDownsample(nn.Module):
+class ResidualDilatedConvNet(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(ResidualDilatedConvDownsample, self).__init__()
+        super(ResidualDilatedConvNet, self).__init__()
 
-        # 分支 1: 标准 3x3 卷积，stride=1
+        # 分支 1: 标准 3x3 卷积
         self.branch1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU()
         )
-
-        # 分支 2: 3x3 卷积 + dilation=1 卷积
+        # 分支 2: 3x3 卷积 + 空洞卷积（膨胀率 1）
         self.branch2 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(out_channels),
@@ -40,8 +39,7 @@ class ResidualDilatedConvDownsample(nn.Module):
             nn.BatchNorm2d(out_channels),
             nn.ReLU()
         )
-
-        # 分支 3: 3x3 卷积 + dilation=1 + dilation=2 卷积
+        # 分支 3: 3x3 卷积 + 空洞卷积（膨胀率 1）+ 空洞卷积（膨胀率 2）
         self.branch3 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(out_channels),
@@ -53,43 +51,36 @@ class ResidualDilatedConvDownsample(nn.Module):
             nn.BatchNorm2d(out_channels),
             nn.ReLU()
         )
-
-        # 整合分支特征
+        # 输出卷积层，整合所有分支的输出
         self.output_conv = nn.Conv2d(out_channels * 3, out_channels, kernel_size=1, stride=1)
 
-        # 平均池化进行下采样
-        self.downsample = nn.AvgPool2d(kernel_size=2, stride=2)
-
-        # 调整输入通道
+        # 如果输入和输出通道不一致，用 1x1 卷积调整输入的通道数
         self.adjust_channels = None
         if in_channels != out_channels:
-            self.adjust_channels = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1)
+            self.adjust_channels = nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
     def forward(self, x):
-        # 保存原输入
-        shortcut = x
-
-        # 各分支
+        # 分支1: 标准卷积特征
         branch1_out = self.branch1(x)
+
+        # 分支2: 3x3 卷积 + 空洞卷积（膨胀率 1）
         branch2_out = self.branch2(x)
+
+        # 分支3: 3x3 卷积 + 空洞卷积（膨胀率 1）+ 空洞卷积（膨胀率 2）
         branch3_out = self.branch3(x)
 
-        # 拼接
+        # 拼接所有分支的输出
         combined_features = torch.cat([branch1_out, branch2_out, branch3_out], dim=1)
 
-        # 整合
+        # 通过 1x1 卷积整合输出特征
         output = self.output_conv(combined_features)
 
-        # 如果需要，调整shortcut通道
+        # 如果输入通道数和输出通道数不匹配，调整输入的通道数
         if self.adjust_channels is not None:
-            shortcut = self.adjust_channels(shortcut)
+            x = self.adjust_channels(x)
 
         # 残差连接
-        output = output + shortcut
-        output = torch.relu(output)
-
-        # 平均池化降分辨率
-        output = self.downsample(output)
+        output = output + x
 
         return output
 
@@ -162,7 +153,7 @@ class Complementaryfeatures2(nn.Module):
 
 
 
-# 专家网络：改一下通道数以及图像尺寸。
+# 专家网络
 class ExpertNetwork(nn.Module):
     def __init__(self, in_channels):
         super(ExpertNetwork, self).__init__()
@@ -207,61 +198,14 @@ class ExpertNetwork(nn.Module):
         return out
 
 # 门控网络
-class SpatialAttentionWithPosEncoding(nn.Module):
-    def __init__(self, height, width):
-        super(SpatialAttentionWithPosEncoding, self).__init__()
-        # 原来是2个通道，拼上位置编码后是4个通道
-        self.conv1 = nn.Conv2d(4, 1, kernel_size=7, padding=3)
-        self.sigmoid = nn.Sigmoid()
-
-        # 生成固定的位置编码
-        self.height = height
-        self.width = width
-        self.register_buffer('pos_encoding', self.create_positional_encoding(height, width))
-
-    def create_positional_encoding(self, height, width):
-        y_range = torch.linspace(-1, 1, steps=height)
-        x_range = torch.linspace(-1, 1, steps=width)
-        y_grid, x_grid = torch.meshgrid(y_range, x_range, indexing='ij')  # PyTorch 1.10以上需要加 indexing
-        pos_encoding = torch.stack([x_grid, y_grid], dim=0)  # (2, H, W)
-        return pos_encoding.unsqueeze(0)  # (1, 2, H, W)
-
-    def forward(self, x):
-        avg_out = torch.mean(x, dim=1, keepdim=True)  # (batch, 1, H, W)
-        max_out, _ = torch.max(x, dim=1, keepdim=True)  # (batch, 1, H, W)
-        feat = torch.cat([avg_out, max_out], dim=1)  # (batch, 2, H, W)
-
-        pos_encoding = self.pos_encoding.expand(x.size(0), -1, -1, -1)  # (batch, 2, H, W)
-
-        feat = torch.cat([feat, pos_encoding], dim=1)  # (batch, 4, H, W)
-
-        out = self.conv1(feat)  # (batch, 1, H, W)
-        return self.sigmoid(out)  # (batch, 1, H, W)
-
-
-class GatingNetworkWithSpatialAttention(nn.Module):
+class GatingNetwork1(nn.Module):
     def __init__(self, input_channels, height, width):
-        super(GatingNetworkWithSpatialAttention, self).__init__()
-        self.spatial_attention = SpatialAttentionWithPosEncoding(height, width)
-        # 注意：*2 是因为后面要 concat 原图特征 和 空间注意力特征
-        self.fc = nn.Linear(input_channels * height * width * 2, 4)  # 输出4个门控权重
+        super(GatingNetwork1, self).__init__()
+        self.fc = nn.Linear(input_channels * height * width * 2, 4)  # 根据实际尺寸调整
 
     def forward(self, x):
-        spatial_att_map = self.spatial_attention(x)  # (batch, 1, H, W)
-        
-        # 把空间注意力图和原始特征结合
-        spatial_att_feat = x * spatial_att_map  # 空间上加权 x (batch, C, H, W)
-
-        # 将 x 和 加了注意力的 spatial_att_feat 拼接
-        combined_feat = torch.cat([x, spatial_att_feat], dim=1)  # (batch, 2C, H, W)
-
-        # 展平
-        combined_feat = combined_feat.view(combined_feat.size(0), -1)
-
-        # 通过全连接层得到门控权重
-        gate_weights = self.fc(combined_feat)
-
-        # softmax归一化成权重
+        x = x.view(x.size(0), -1)  # 确保展平时尺寸匹配
+        gate_weights = self.fc(x)
         return F.softmax(gate_weights, dim=1)
 
 class GatingNetwork2(nn.Module):
