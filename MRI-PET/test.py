@@ -85,8 +85,8 @@ def main():
     start_time = time.time()  # 记录测试开始时间
 
     # 定义数据文件夹路径
-    test_mri_dir = '/root/autodl-tmp/Havard-Medical-Image-Fusion-Datasets-main/MyDatasets/SPECT-MRI/test/MRI'
-    test_pet_dir = '/root/autodl-tmp/Havard-Medical-Image-Fusion-Datasets-main/MyDatasets/SPECT-MRI/test/SPECT'
+    test_mri_dir = '/root/autodl-tmp/Havard-Medical-Image-Fusion-Datasets-main/MyDatasets/PET-MRI/test/MRI'
+    test_pet_dir = '/root/autodl-tmp/Havard-Medical-Image-Fusion-Datasets-main/MyDatasets/PET-MRI/test/PET'
 
     #test_mri_dir = '/root/autodl-tmp/GFP PC/pc'
     #test_pet_dir = '/root/autodl-tmp/GFP PC/gfp'
@@ -109,7 +109,7 @@ def main():
     model = model.to(device)
 
     # 加载训练好的模型
-    model_path = 'models/model_epoch_82.pth'
+    model_path = 'models/model_epoch_64.pth'
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"模型文件未找到: {model_path}")
 
